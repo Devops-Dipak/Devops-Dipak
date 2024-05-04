@@ -1,0 +1,65 @@
+my deployment process
+
+Deployment Process 
+Generate customer specific baseline for
+Patch deployment- Refer this
+
+Generate baseline for Patch deployment
+Generate baseline for Patch deployment
+Take the VAM version to be deployed and check for the corresponding baseline number from respective version release page on confluence here. This is Tieto baseline with name VAM-tieto-<Track>-<BL Number>
+
+
+Search for this tieto baseline in InfoWeb portal and note the parent baseline for this. This is generic baseline with name VAM-generic-<Track>-<BL Number>.
+
+
+Update this generic baseline number in PipelineTracks.groovy for the corresponding customer for corresponding track as shown below. Merge the changes into master.
+
+
+Once the master build is completed, trigger Component-Check-VAM-<Customer>-<Track> pipeline. This pipeline will check for the updated components from the last deployment. If it finds any component that has updated, then it will trigger the pipeline named Baseline-Generation-VAM-<Customer>-<Track>. 
+Baseline-Generation-VAM-<Customer>-<Track> pipeline will create a customer specific baseline VAM-<Customer>-<Track>-<BL Number>. Note the parent baseline from which it has been created.
+
+-------------------------------------------------
+
+HF deployment- 
+Take the component version to be deployed as part of HF from respective version release page on confluence here.
+
+
+Create a new recipe yml file for every HF here in ci-baseline-recipes repository. This file contains information about all the component versions to be deployed. Mention the proper component version for which HF is released. All other component version should be same as that in last patch/HF delivery. Also mention components which are not to be delivered for that particular customer. One can take reference from already existing recipe yml files. Merge the changes into master.
+Once the master build is completed, trigger Baseline-Generation-Custom pipeline. Mention all parameters accordingly. 
+
+
+This will create a customer specific HF baseline VAM-<Customer>-<Track>-<Version>. Note the parent baseline from which it has been created.
+
+---------------------------------------------------------------------------------
+-------------------------------------------------------------------------------------
+
+
+Once the baseline is generated, trigger Kubernetes-Image-Build-bnym-VAM2.2.5-test pipeline to build the Kubernetes images for all the components present inside baseline. Once this pipeline is completed, ensure "k8 images" tab turns Green as shown below.
+
+
+Trigger Kubernetes-Deployment-bnym-VAM2.2.5-test pipeline after providing all corresponding parameters as shown below.
+
+
+Perform post-deployment changes as below by referring this:
+Module Name: GSSO
+Property File Name: env-config.properties
+
+# Old Value:
+saml.saml.cert.validation.required = true
+basic.token.expiry.check.required = true
+ 
+# New Value:
+saml.saml.cert.validation.required = false
+basic.token.expiry.check.required = false
+
+
+How to do custom changes in K8s environment
+Custom component deployment-
+Place the corresponding *.war file in '/custom_deployment/<component_name>/' folder.
+Restart the corresponding pod from infoweb portal here.
+Custom war file will get deployed onto the server.
+Custom configuration changes-
+In case of modification of existing file, copy the corresponding file from '/configuration_files/<component_name>/<file_name>' and paste it here '/custom_configuration/<component_name>/<file_name>'. Keep the file path structure same. Now modify the file as needed.
+In case of new file to be added, place the corresponding file in '/custom_configuration/<component_name>/<file_name>'. Keep the file path structure appropriately.
+Restart the corresponding pod from infoweb portal here.
+Custom configurations will get deployed onto the server.
