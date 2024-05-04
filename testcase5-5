@@ -1,0 +1,126 @@
+new practive session
+
+
+#!/usr/bin/env groovy
+
+static boolean isMainBranch(env) {
+    return (((env.GIT_BRANCH as String).equals("origin/master")) || ((env.GIT_BRANCH as String).equals("master")))
+}
+
+pipeline {
+    agent { label 'automation' }
+    stages {
+        stage('Prepare') {
+            steps {
+                script {
+                    notifyBitbucket()
+                }
+            }
+        }
+        stage("Build Jenkins-jobs") {
+            steps {
+                script {
+                    try {
+                        sh('./gradlew clean test check generateJobs')
+                    } catch (error) {
+                        echo "ERROR: Problem running the pipeline: ${error}"
+                        sh 'tar -czvf test.tar.gz build/reports/tests/test/'
+                        archiveArtifacts artifacts: 'test.tar.gz'
+                        currentBuild.result = 'FAILURE'
+                        notifyBitbucket()
+                    }
+                }
+            }
+        }
+        stage("Deploy Jenkins-jobs") {
+            when {
+                expression { return isMainBranch(env) }
+            }
+            steps {
+                script {
+                    try {
+                        lock('jenkins-job-config') {
+                            jobDsl targets: 'src/main/groovy/jobdsl.groovy',
+                                removedJobAction: 'DELETE',
+                                removedViewAction: 'DELETE',
+                                lookupStrategy: 'JENKINS_ROOT',
+                                additionalClasspath: 'src/main/groovy',
+                                sandbox: true
+                        }
+                    } catch (error) {
+                        echo "ERROR: Problem running the pipeline: ${error}"
+                        currentBuild.result = 'FAILURE'
+                        notifyBitbucket()
+                    }
+                }
+            }
+        }
+        stage("Check for manual jenkins jobs") {
+            when {
+                expression { return isMainBranch(env) }
+            }
+            steps {
+                script {
+                    try {
+                        int jobCounter = 0
+                        def manual_jobs = [:]
+                        def outcomeJobs = ''
+                        final exclusions = ['kamblsan']
+                        final jobs_in_jenkins = hudson.model.Hudson.instance.items.findAll { job -> job }
+                        final foundFiles = findFiles(glob: 'build/jobdsl/*.xml')
+
+                        jobs_in_jenkins.each() { job ->
+                            manual_jobs[job.name.toLowerCase()] = job
+                        }
+                        foundFiles.each() { file ->
+                            def name = file.getName().minus('.xml').toLowerCase()
+                            if (manual_jobs.containsKey(name)) {
+                                manual_jobs.remove(name)
+                            }
+                        }
+                        manual_jobs.each() { manualkey, manualvalue ->
+                            def isExcluded = false
+                            exclusions.each() { excluded ->
+                                if (manualkey.startsWith(excluded)) {
+                                    isExcluded = true
+                                }
+                            }
+                            if (!isExcluded) {
+                                outcomeJobs = outcomeJobs + '<li><a href="' + manualvalue.getAbsoluteUrl() + '">' + manualkey + '</a></li>' + "\n"
+                                jobCounter++
+                            }
+                        }
+                        def outcome = """
+                        <html><head><title>Manually created jobs</title></head><body>
+                        <h1>Manually created jobs</h1>
+                        <p>Number of manually created jobs: ${jobCounter}</p>
+                        <ul>${outcomeJobs}</ul>
+                        </body></html>
+                        """
+                        writeFile(file: "build/manually_created_jobs.html", text: outcome)
+                        archiveArtifacts artifacts: 'build/manually_created_jobs.html', allowEmptyArchive: true
+                    } catch (error) {
+                        echo "ERROR: Problem running the pipeline: ${error}"
+                        currentBuild.result = 'FAILURE'
+                        notifyBitbucket()
+                    }
+                }
+            }
+        }
+    }
+    post {
+        always {
+            script {
+                currentBuild.result = currentBuild.result ?: 'SUCCESS'
+                notifyBitbucket()
+                publishHTML (target : [allowMissing: true,
+                                 alwaysLinkToLastBuild: true,
+                                 keepAll: true,
+                                 reportDir: 'build/reports/codenarc',
+                                 reportFiles: 'main.html',
+                                 reportName: 'Codenarc',
+                                 reportTitles: 'Lint'])
+            }
+        }
+    }
+}
